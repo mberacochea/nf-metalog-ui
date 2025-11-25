@@ -1,0 +1,12 @@
+[project]
+name = "nf-metalog-ui"
+version = "0.1.0"
+description = "TUI for visualizing nf-metalog SQLite data"
+requires-python = ">=3.14"
+dependencies = [
+    "textual>=0.47.0",
+    "pytz>=2025.2",
+]
+
+[project.scripts]
+metalog-ui = "nf_metalog_ui.app:main"
