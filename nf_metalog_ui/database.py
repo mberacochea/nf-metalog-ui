@@ -9,14 +9,14 @@ from typing import Optional
 class RunInfo:
     """Information about a run."""
     run_name: str
-    last_updated: datetime
+    ingested: datetime
     total_tasks: int
 
 
 @dataclass
 class IdSummary:
     """Aggregated summary for an ID."""
-    id: str
+    group_id: str
     total_tasks: int
     submitted: int
     completed: int
@@ -59,21 +59,21 @@ class MetalogDB:
         query = """
             SELECT
                 run_name,
-                MAX(ingested) as last_updated,
+                MAX(ingested) as last_ingested,
                 COUNT(*) as total_tasks
             FROM metalog
             GROUP BY run_name
-            ORDER BY last_updated DESC
+            ORDER BY last_ingested DESC
         """
         cursor = self.conn.execute(query)
         result = cursor.fetchall()
-        return [RunInfo(run_name=r[0], last_updated=datetime.fromisoformat(r[1]), total_tasks=r[2]) for r in result]
+        return [RunInfo(run_name=r[0], ingested=datetime.fromisoformat(r[1]), total_tasks=r[2]) for r in result]
 
     def get_id_summary(self, run_name: str) -> list[IdSummary]:
         """Get aggregated summary by ID for a specific run."""
         query = """
             SELECT
-                id,
+                group_id,
                 COUNT(*) as total_tasks,
                 SUM(CASE WHEN status = 'SUBMITTED' THEN 1 ELSE 0 END) as submitted,
                 SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) as completed,
@@ -82,14 +82,14 @@ class MetalogDB:
                 SUM(CASE WHEN status = 'CACHED' THEN 1 ELSE 0 END) as cached
             FROM metalog
             WHERE run_name = ?
-            GROUP BY id
-            ORDER BY id
+            GROUP BY group_id
+            ORDER BY group_id
         """
         cursor = self.conn.execute(query, (run_name,))
         result = cursor.fetchall()
         return [
             IdSummary(
-                id=row[0],
+                group_id=row[0],
                 total_tasks=row[1],
                 submitted=row[2],
                 completed=row[3],
@@ -99,7 +99,7 @@ class MetalogDB:
             ) for row in result
         ]
 
-    def get_process_details(self, run_name: str, id: str) -> list[ProcessDetail]:
+    def get_process_details(self, run_name: str, group_id: str) -> list[ProcessDetail]:
         """Get detailed process information for a specific run and ID."""
         query = """
             SELECT
@@ -109,10 +109,10 @@ class MetalogDB:
                 ingested,
                 metadata
             FROM metalog
-            WHERE run_name = ? AND id = ?
+            WHERE run_name = ? AND group_id = ?
             ORDER BY ingested DESC
         """
-        cursor = self.conn.execute(query, (run_name, id))
+        cursor = self.conn.execute(query, (run_name, group_id))
         result = cursor.fetchall()
         return [
             ProcessDetail(

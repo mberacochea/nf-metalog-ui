@@ -1,5 +1,4 @@
 import argparse
-import json
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -7,7 +6,7 @@ from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import DataTable, Footer, Header, Label, Select, Static
-from textual.reactive import reactive
+from textual.widgets import Pretty
 from textual import on
 
 from nf_metalog_ui.database import MetalogDB
@@ -16,21 +15,21 @@ from nf_metalog_ui.database import MetalogDB
 class RunSelector(Container):
     """Widget for selecting a run."""
 
-    DEFAULT_CSS = """
-    RunSelector {
-        height: 3;
-        background: $panel;
-        padding: 1;
-    }
-    """
+    # DEFAULT_CSS = """
+    # RunSelector {
+    #     height: 3;
+    #     background: $panel;
+    #     padding: 1;
+    # }
+    # """
 
     def __init__(self, db: MetalogDB):
         super().__init__()
         self.db = db
-        self.selected_run = reactive(None)
+        self.selected_run = None
 
     def compose(self) -> ComposeResult:
-        yield Label("Run: ", id="run-label")
+        yield Label("Pipeline run: ", id="run-label")
         yield Select([("Loading...", "")], id="run-select", allow_blank=True)
 
     def on_mount(self):
@@ -43,12 +42,15 @@ class RunSelector(Container):
         select = self.query_one("#run-select", Select)
 
         if runs:
-            options = [(f"{r.run_name} (Last: {r.last_updated.strftime('%Y-%m-%d %H:%M:%S')}, Tasks: {r.total_tasks})", r.run_name) for r in runs]
+            options = [(f"{r.run_name} (Last: {r.ingested.strftime('%Y-%m-%d %H:%M:%S')}, Tasks: {r.total_tasks})", r.run_name) for r in runs]
             select.set_options(options)
             if self.selected_run is None:
                 # Auto-select the most recent run
                 select.value = runs[0].run_name
                 self.selected_run = runs[0].run_name
+        else:
+            # Print a message
+            pass
 
     @on(Select.Changed, "#run-select")
     def on_run_changed(self, event: Select.Changed):
@@ -61,22 +63,22 @@ class RunSelector(Container):
 class IdSummaryTable(Container):
     """Widget displaying aggregated ID summary."""
 
-    DEFAULT_CSS = """
-    IdSummaryTable {
-        height: 50%;
-        border: solid $primary;
-    }
-    """
+    # DEFAULT_CSS = """
+    # IdSummaryTable {
+    #     height: 50%;
+    #     border: solid $primary;
+    # }
+    # """
 
     def __init__(self, db: MetalogDB):
         super().__init__()
         self.db = db
-        self.selected_id = reactive(None)
+        self.selected_id = None
 
     def compose(self) -> ComposeResult:
-        yield Label("ID Summary", id="id-summary-title")
+        yield Label("Run tasks summary", id="id-summary-title")
         table = DataTable(id="id-table", cursor_type="row")
-        table.add_columns("ID", "Total", "Submitted", "Running", "Completed", "Failed", "Cached")
+        table.add_columns("Task id", "Total", "Submitted", "Running", "Completed", "Failed", "Cached")
         yield table
 
     def refresh_data(self, run_name: str):
@@ -87,19 +89,19 @@ class IdSummaryTable(Container):
         summaries = self.db.get_id_summary(run_name)
         for summary in summaries:
             table.add_row(
-                summary.id,
+                summary.group_id,
                 str(summary.total_tasks),
-                f"[cyan]{summary.submitted}[/cyan]" if summary.submitted > 0 else "0",
-                f"[yellow]{summary.running}[/yellow]" if summary.running > 0 else "0",
-                f"[green]{summary.completed}[/green]" if summary.completed > 0 else "0",
-                f"[red]{summary.failed}[/red]" if summary.failed > 0 else "0",
-                f"[blue]{summary.cached}[/blue]" if summary.cached > 0 else "0"
+                f"[cyan]{summary.submitted or "0"}[/cyan]",
+                f"[yellow]{summary.running or "0"}[/yellow]",
+                f"[green]{summary.completed or "0"}[/green]",
+                f"[red]{summary.failed or "0"}[/red]",
+                f"[blue]{summary.cached or "0"}[/blue]"
             )
 
         # Auto-select first row if available and no selection exists
-        if len(summaries) > 0 and self.selected_id is None:
+        if len(summaries) and self.selected_id is None:
             table.move_cursor(row=0)
-            self.selected_id = summaries[0].id
+            self.selected_id = summaries[0].group_id
 
     @on(DataTable.RowHighlighted, "#id-table")
     def on_id_selected(self, event: DataTable.RowHighlighted):
@@ -115,17 +117,17 @@ class IdSummaryTable(Container):
 class ProcessDetailTable(Container):
     """Widget displaying process details."""
 
-    DEFAULT_CSS = """
-    ProcessDetailTable {
-        height: 50%;
-        border: solid $primary;
-    }
-    """
+    # DEFAULT_CSS = """
+    # ProcessDetailTable {
+    #     height: 50%;
+    #     border: solid $primary;
+    # }
+    # """
 
     def __init__(self, db: MetalogDB):
         super().__init__()
         self.db = db
-        self.selected_process = reactive(None)
+        self.selected_process = None
 
     def compose(self) -> ComposeResult:
         yield Label("Process Details", id="process-detail-title")
@@ -133,12 +135,12 @@ class ProcessDetailTable(Container):
         table.add_columns("Process", "Task ID", "Status", "Ingested")
         yield table
 
-    def refresh_data(self, run_name: str, id: str):
+    def refresh_data(self, run_name: str, group_id: str):
         """Refresh the process detail data."""
         table = self.query_one("#process-table", DataTable)
         table.clear()
 
-        details = self.db.get_process_details(run_name, id)
+        details = self.db.get_process_details(run_name, group_id)
         for detail in details:
             # Map status to color
             status_colors = {
@@ -183,48 +185,47 @@ class MetadataPane(Container):
         self.db = db
 
     def compose(self) -> ComposeResult:
-        yield Label("Metadata", id="metadata-title")
-        yield Static("No selection", id="metadata-content")
+        yield Label("Process information", id="metadata-title")
+        yield Pretty("No selection", id="metadata-content")
 
-    def refresh_data(self, run_name: str, id: str, process: str, task_id: str):
+    def refresh_data(self, run_name: str, group_id: str, process: str, task_id: str):
         """Refresh metadata for selected process."""
-        details = self.db.get_process_details(run_name, id)
+        details = self.db.get_process_details(run_name, group_id)
 
         # Find the matching process
         for detail in details:
             if detail.process == process and detail.task_id == task_id:
-                content = self.query_one("#metadata-content", Static)
+                content = self.query_one("#metadata-content", Pretty)
                 if detail.metadata:
-                    metadata_str = json.dumps(detail.metadata, indent=2)
-                    content.update(metadata_str)
+                    content.update(detail.metadata)
                 else:
-                    content.update("No metadata available")
+                    content.update("No process data available")
                 break
 
 
 class MetalogApp(App):
     """Main TUI application for nf-metalog visualization."""
 
-    CSS = """
-    Screen {
-        background: $surface;
-    }
-
-    #main-container {
-        height: 100%;
-    }
-
-    #left-panel {
-        width: 60%;
-    }
-
-    #status-bar {
-        height: 1;
-        background: $panel;
-        color: $text-muted;
-        padding: 0 1;
-    }
-    """
+    # CSS = """
+    # Screen {
+    #     background: $surface;
+    # }
+    #
+    # #main-container {
+    #     height: 100%;
+    # }
+    #
+    # #left-panel {
+    #     width: 60%;
+    # }
+    #
+    # #status-bar {
+    #     height: 1;
+    #     background: $panel;
+    #     color: $text-muted;
+    #     padding: 0 1;
+    # }
+    # """
 
     BINDINGS = [
         ("q", "quit", "Quit"),
@@ -261,7 +262,7 @@ class MetalogApp(App):
         if new_run:
             id_table = self.query_one(IdSummaryTable)
             id_table.refresh_data(new_run)
-            self.update_status(f"Viewing run: {new_run}")
+            self.update_status(f"Viewing pipeline run: {new_run}")
 
     def watch_selected_id(self, new_id: str):
         """Watch for ID selection changes."""
